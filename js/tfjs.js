@@ -84,19 +84,21 @@ predictBtn.onclick = async () => {
       // Note: .dataSync() returns a TypedArray synchronously, so we do it outside tidy to prevent early disposal
       const probs = outputTensor.dataSync();
 
-      // 8. Find max probability and index
-      let maxIdx = 0;
-      let maxProb = probs[0];
-      for (let i = 1; i < probs.length; i++) {
-        if (probs[i] > maxProb) {
-          maxProb = probs[i];
-          maxIdx = i;
-        }
-      }
+      // 8. Find the index and probability of the highest value
+      const maxIdx = probs.reduce(
+        (maxIndex, prob, i, arr) => (prob > arr[maxIndex] ? i : maxIndex),
+        0
+      );
+      const maxProb = probs[maxIdx];
 
-      const predictedLabel = emnistLabels[maxIdx] || maxIdx;
-      predictionDiv.innerHTML = `<b>Predicted:</b> ${predictedLabel} <br/>
-                                 <b>Confidence:</b> ${(maxProb * 100).toFixed(2)}%`;
+      // Determine the predicted label (fallback to index if label missing)
+      const predictedLabel = emnistLabels?.[maxIdx] ?? maxIdx;
+
+      // Display the prediction and confidence
+      predictionDiv.innerHTML = `
+        <b>Predicted:</b> ${predictedLabel} <br/>
+        <b>Confidence:</b> ${(maxProb * 100).toFixed(2)}%
+      `;
     });
   } catch (error) {
     predictionDiv.textContent = `Error during prediction: ${error.message}`;
@@ -152,5 +154,8 @@ clearBtn.addEventListener("click", () => {
 
   ctx.fillStyle = "white";
   ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-  predictionDiv.innerText = "Prediction: ?";
+  predictionDiv.innerHTML = `
+    <b>Predicted:</b> ? <br/>
+    <b>Confidence:</b> ?
+  `;
 });

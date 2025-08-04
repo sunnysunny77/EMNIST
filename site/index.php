@@ -28,7 +28,11 @@
 
     </div>
 
-    <div id="prediction">Prediction: ?</div>
+    <div id="prediction">
+
+      Loading model...
+
+    </div>
 
   </div>
 
