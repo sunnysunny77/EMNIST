@@ -1,0 +1,21 @@
+{
+    "name": "HDR",
+    "short_name": "HDR",
+    "start_url": "/",
+    "background_color": "#FFC0CB",
+    "theme_color": "#FFC0CB",
+    "display": "standalone",
+    "icons": [       
+        {
+            "src": "images/pwa-logo.webp",
+            "sizes": "512x512",
+            "type": "image/webp"
+        },
+        {
+            "src": "images/pwa-logo-small.webp",
+            "sizes": "192x192",
+            "type": "image/webp"
+        }
+    ]
+   
+}

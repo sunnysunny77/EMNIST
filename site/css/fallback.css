@@ -1,0 +1,40 @@
+@font-face {
+    font-family: "Poppins";
+    font-display: swap;
+    font-weight: 400;
+    src: url(../font/Poppins-Regular.ttf);
+}
+
+#fallback  {
+    display: flex;
+    flex-direction: column; 
+    align-items: center;
+    justify-content: center; 
+    padding: 0 1.5rem;
+    min-height: 100vh;
+}
+
+#fallback img {
+    display: block;
+    margin: 0 auto;
+}
+
+#fallback h1 {
+    text-align: center;
+    font-size: 18px;
+    font-weight: 400;
+    font-family: "Poppins";
+}
+
+#go-back {
+    display: block;
+    text-align: center;
+    font-size: 18px;
+    font-weight: 400;
+    font-family: "Poppins";
+    border: 1px solid black;
+    border-radius: 20px;
+    background: transparent;
+    outline: none;
+}
+
