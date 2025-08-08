@@ -73,7 +73,7 @@ predictBtn.onclick = async () => {
   }
 };
 
-function getCanvasCoords(e) {
+const getCanvasCoords = (e) => {
 
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
