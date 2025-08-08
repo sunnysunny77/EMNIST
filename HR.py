@@ -7,8 +7,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from tensorflow.keras import layers, models
 
-df_test = pd.read_csv("./emnist-balanced-test.csv", header=None)
-df_train = pd.read_csv("./emnist-balanced-train.csv", header=None)
+df_test = pd.read_csv("./emnist-letters-test.csv", header=None)
+df_train = pd.read_csv("./emnist-letters-train.csv", header=None)
 
 def prep(X_flat):
     X_reshaped = X_flat.reshape(-1, 28, 28)
@@ -18,20 +18,20 @@ def prep(X_flat):
     return X_fixed.astype(np.float32) / 255.0
 
 X_test = prep(df_test.drop(columns=[0]).values)
-y_test = df_test[0].values
+y_test = df_test[0].values - 1
 
 X_train = prep(df_train.drop(columns=[0]).values)
-y_train = df_train[0].values
+y_train = df_train[0].values - 1
 
 X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(X_train, y_train, test_size=0.1, random_state=42)
 
-y_train_split = to_categorical(y_train_split, 47)
-y_val_split   = to_categorical(y_val_split, 47)
-y_test        = to_categorical(y_test, 47)
+y_train_split = to_categorical(y_train_split, 26)
+y_val_split   = to_categorical(y_val_split, 26)
+y_test        = to_categorical(y_test, 26)
 
 class_weights = compute_class_weight(
     class_weight='balanced',
-    classes=np.arange(47),
+    classes=np.arange(26),
     y=np.argmax(y_train_split, axis=1)
 )
 class_weights = dict(enumerate(class_weights))
@@ -82,7 +82,7 @@ x = layers.GlobalAveragePooling2D()(x)
 
 x = layers.Dropout(0.5)(x)
 
-outputs = layers.Dense(47, activation='softmax')(x)
+outputs = layers.Dense(26, activation='softmax')(x)
 
 model = models.Model(inputs, outputs)
 
@@ -125,5 +125,3 @@ print(f"Test accuracy: {test_acc:.4f}")
 
 model.save('HR', save_format='tf')
 
-
-#90%
