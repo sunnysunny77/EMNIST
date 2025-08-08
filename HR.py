@@ -1,200 +1,123 @@
-import tensorflow as tf
-import tensorflow_datasets as tfds
-import matplotlib.pyplot as plt
+import pandas as pd
 import numpy as np
-import random
-from tensorflow.keras import layers, models, callbacks, regularizers
+import tensorflow as tf
+from tensorflow.keras import layers
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from sklearn.model_selection import train_test_split
 
-# Load EMNIST ByClass dataset
-emnist_data, emnist_info = tfds.load('emnist/byclass', with_info=True, as_supervised=True)
-num_classes = emnist_info.features['label'].num_classes
+df_test = pd.read_csv("./emnist-balanced-test.csv", header=None)
+df_train = pd.read_csv("./emnist-balanced-train.csv", header=None)
 
-train_ds_raw = emnist_data['train']
-test_ds_raw = emnist_data['test']
+def prep(X_flat):
 
-BATCH_SIZE = 1024
+    X_reshaped = X_flat.reshape(-1, 28, 28)
+    
+    X_rotated = np.rot90(X_reshaped, k=1, axes=(1, 2))
+    X_flipped = np.fliplr(X_rotated)
+    
+    X_fixed = X_flipped[..., np.newaxis]
+    
+    return X_fixed.astype(np.float32) / 255.0
 
-# Fix orientation: rotate 270° CCW and flip left-right
-def fix_orientation(image, label):
-    image = tf.image.rot90(image, k=3)
-    image = tf.image.flip_left_right(image)
-    return image, label
+X_test = prep(df_test.drop(columns=[0]).values)
+y_test = df_test[0].values
 
-# Normalize and add channel dimension
-def normalize_img(image, label):
-    image = tf.cast(image, tf.float32) / 255.0
-    image = tf.expand_dims(image, -1)
-    return image, label
+X_train = prep(df_train.drop(columns=[0]).values)
+y_train = df_train[0].values
 
-# Prepare datasets
-train_ds = (
-    train_ds_raw
-    .map(fix_orientation, num_parallel_calls=tf.data.AUTOTUNE)
-    .map(normalize_img, num_parallel_calls=tf.data.AUTOTUNE)
-    .shuffle(10000)
-    .batch(BATCH_SIZE)
-    .prefetch(tf.data.AUTOTUNE)
+X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(
+    X_train, y_train, test_size=0.1, random_state=42
 )
 
-test_ds = (
-    test_ds_raw
-    .map(fix_orientation, num_parallel_calls=tf.data.AUTOTUNE)
-    .map(normalize_img, num_parallel_calls=tf.data.AUTOTUNE)
-    .batch(BATCH_SIZE)
-    .prefetch(tf.data.AUTOTUNE)
+train_datagen = ImageDataGenerator(
+    rotation_range=10,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    zoom_range=0.1
 )
 
-# Augmentation layers
-augmentation = tf.keras.Sequential([
-    layers.RandomRotation(0.1),
-    layers.RandomZoom(0.15),
-    layers.RandomTranslation(0.1, 0.1),
-    layers.RandomBrightness(factor=0.1),
-    layers.RandomContrast(0.1),
-])
+val_datagen = ImageDataGenerator()
 
-# Residual block with L2 regularization
-def residual_block(x, filters, stride=1):
+def residual_block(x, filters, kernel_size=3, stride=1):
     shortcut = x
-    x = layers.Conv2D(filters, 3, strides=stride, padding='same',
-                      kernel_initializer='he_normal',
-                      kernel_regularizer=regularizers.l2(1e-4))(x)
+    
+    x = layers.Conv2D(filters, kernel_size, strides=stride, padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.ReLU()(x)
-
-    x = layers.Conv2D(filters, 3, padding='same',
-                      kernel_initializer='he_normal',
-                      kernel_regularizer=regularizers.l2(1e-4))(x)
+    
+    x = layers.Conv2D(filters, kernel_size, strides=1, padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
-
+    
     if stride != 1 or shortcut.shape[-1] != filters:
-        shortcut = layers.Conv2D(filters, 1, strides=stride, padding='same',
-                                 kernel_initializer='he_normal',
-                                 kernel_regularizer=regularizers.l2(1e-4))(shortcut)
+        shortcut = layers.Conv2D(filters, 1, strides=stride, padding='same', use_bias=False)(shortcut)
         shortcut = layers.BatchNormalization()(shortcut)
-
+        
     x = layers.Add()([x, shortcut])
     x = layers.ReLU()(x)
     return x
 
-# Core ResNet model (deeper + more filters)
-def build_core_resnet(input_shape=(28,28,1), num_classes=62):
-    inputs = layers.Input(shape=input_shape)
-    x = layers.Conv2D(64, 3, strides=1, padding='same',
-                      kernel_initializer='he_normal',
-                      kernel_regularizer=regularizers.l2(1e-4))(inputs)
-    x = layers.BatchNormalization()(x)
-    x = layers.ReLU()(x)
+inputs = tf.keras.Input(shape=(28, 28, 1))
 
-    # Stage 1: 3x blocks with 64 filters
-    x = residual_block(x, 64)
-    x = residual_block(x, 64)
-    x = residual_block(x, 64)
-    x = layers.MaxPooling2D(2)(x)
+x = layers.Conv2D(32, 3, strides=1, padding='same', use_bias=False)(inputs)
+x = layers.BatchNormalization()(x)
+x = layers.ReLU()(x)
 
-    # Stage 2: 3x blocks with 128 filters
-    x = residual_block(x, 128, stride=2)
-    x = residual_block(x, 128)
-    x = residual_block(x, 128)
+x = residual_block(x, 32)
+x = residual_block(x, 32)
 
-    # Stage 3: 3x blocks with 256 filters
-    x = residual_block(x, 256, stride=2)
-    x = residual_block(x, 256)
-    x = residual_block(x, 256)
+x = residual_block(x, 64, stride=2)
+x = residual_block(x, 64)
 
-    x = layers.GlobalAveragePooling2D()(x)
-    x = layers.Dropout(0.5)(x)
-    outputs = layers.Dense(num_classes, activation='softmax',
-                           kernel_initializer='he_normal')(x)
+x = residual_block(x, 128, stride=2)
+x = residual_block(x, 128)
 
-    return models.Model(inputs, outputs)
+x = layers.GlobalAveragePooling2D()(x)
 
-# Training wrapper (with augmentation)
-def build_training_model(input_shape=(28,28,1), num_classes=62):
-    inputs = layers.Input(shape=input_shape)
-    x = augmentation(inputs)
-    core_model = build_core_resnet(input_shape, num_classes)
-    outputs = core_model(x)
-    return models.Model(inputs, outputs), core_model
+x = layers.Dropout(0.5)(x)
 
-# Create models
-training_model, core_model = build_training_model()
+outputs = layers.Dense(47, activation='softmax')(x)
 
-# Compile training model
-training_model.compile(
-    optimizer=tf.keras.optimizers.Adam(1e-3),
+model = tf.keras.Model(inputs, outputs)
+
+model.compile(
+    optimizer='adam',
     loss='sparse_categorical_crossentropy',
     metrics=['accuracy']
 )
 
-# Callbacks
-lr_scheduler = callbacks.ReduceLROnPlateau(
+early_stop = tf.keras.callbacks.EarlyStopping(
     monitor='val_loss',
-    factor=0.5,
-    patience=5,
-    verbose=1,
-    min_lr=1e-6
-)
-
-early_stopping = callbacks.EarlyStopping(
-    monitor='val_accuracy',
     patience=10,
     restore_best_weights=True,
-    verbose=1
 )
 
-checkpoint = callbacks.ModelCheckpoint(
-    'best_model.keras',
-    save_best_only=True,
-    monitor='val_accuracy'
+model.fit(
+    train_datagen.flow(X_train_split, y_train_split, batch_size=32),
+    validation_data=val_datagen.flow(X_val_split, y_val_split, batch_size=32),
+    epochs=300,
+    callbacks=[early_stop],
+    verbose=2
 )
 
-# Train model
-history = training_model.fit(
-    train_ds,
-    validation_data=test_ds,
-    epochs=50,
-    callbacks=[lr_scheduler, early_stopping, checkpoint]
-)
+test_loss, test_acc = model.evaluate(X_test, y_test, verbose=2)
+print(f"Test loss: {test_loss} | Test accuracy: {test_acc}")
 
-# Evaluate final (clean) core model
-core_model.compile(
-    optimizer=tf.keras.optimizers.Adam(),
-    loss='sparse_categorical_crossentropy',
-    metrics=['accuracy']
-)
+mapping = {
+    0: '0', 1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9',
+    10: 'A', 11: 'B', 12: 'C', 13: 'D', 14: 'E', 15: 'F', 16: 'G', 17: 'H', 18: 'I',
+    19: 'J', 20: 'K', 21: 'L', 22: 'M', 23: 'N', 24: 'O', 25: 'P', 26: 'Q', 27: 'R',
+    28: 'S', 29: 'T', 30: 'U', 31: 'V', 32: 'W', 33: 'X', 34: 'Y', 35: 'Z',
+    36: 'a', 37: 'b', 38: 'd', 39: 'e', 40: 'f', 41: 'g', 42: 'h', 43: 'n', 44: 'q',
+    45: 'r', 46: 't',
+}
 
-test_loss, test_acc = core_model.evaluate(test_ds)
-print(f"\nTest Accuracy: {test_acc:.4f} | Test Loss: {test_loss:.4f}")
+predicted_labels = np.argmax(model.predict(X_test), axis=1)
+predicted_chars = [mapping[label] for label in predicted_labels]
+actual_chars = [mapping[label] for label in y_test]
 
-# Load class names from the EMNIST info
-class_names = [str(i) for i in range(num_classes)]
+print("First 10 predictions vs actual:")
+for i in range(10):
+    print(f"Predicted: {predicted_chars[i]} \t Actual: {actual_chars[i]}")
 
-# Fetch a batch of test images and labels
-test_images, test_labels = next(iter(test_ds.unbatch().batch(64)))
-
-# Choose random indices
-num_to_plot = 9
-indices = random.sample(range(test_images.shape[0]), num_to_plot)
-images = tf.gather(test_images, indices)
-labels = tf.gather(test_labels, indices)
-
-# Predict using core_model
-pred_probs = core_model.predict(images)
-pred_labels = tf.argmax(pred_probs, axis=1)
-
-# Plot
-plt.figure(figsize=(10, 10))
-for i in range(num_to_plot):
-    plt.subplot(3, 3, i + 1)
-    plt.imshow(tf.squeeze(images[i]), cmap='gray')
-    plt.title(f"Pred: {pred_labels[i].numpy()}, True: {labels[i].numpy()}")
-    plt.axis('off')
-plt.tight_layout()
-plt.show()
-
-# Export SavedModel
-core_model.export("HR_tf")
-
-# Convert to TensorFlow.js
-!tensorflowjs_converter --input_format=tf_saved_model --output_format=tfjs_graph_model HR_tf tfjs_model_HR_tf
+accuracy = np.mean(predicted_labels == y_test)
+print(f"\nAccuracy: {accuracy:.4f}")
