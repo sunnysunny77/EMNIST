@@ -10,7 +10,6 @@ let drawing = false;
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const CANVAS_SIZE = 280;
-const modelInputSize = 28;
 canvas.width = CANVAS_SIZE;
 canvas.height = CANVAS_SIZE;
 
@@ -54,34 +53,20 @@ predictBtn.onclick = async () => {
   }
 
   try {
-   tf.tidy(() => {
- 
-      let imgTensor = tf.browser.fromPixels(canvas);
-      imgTensor = imgTensor.slice([0, 0, 0], [-1, -1, 3]);
-      const grayscaleTensor = imgTensor.mean(2);
-      const resizedTensor = tf.image.resizeBilinear(
-        grayscaleTensor.expandDims(-1),
-        [modelInputSize, modelInputSize]
-      );
-      const normalizedTensor = tf.div(tf.sub(255, resizedTensor), 255);
-      const inputTensor = normalizedTensor.expandDims(0);
-      const outputTensor = model.predict(inputTensor);
-      const probs = outputTensor.dataSync();
-      probs.forEach((prob, i) => {
-        console.log(`${emnistLabels[i]}: ${(prob * 100).toFixed(2)}%`);
-      });
-      const maxIdx = probs.reduce(
-        (maxIndex, prob, i, arr) => (prob > arr[maxIndex] ? i : maxIndex),
-        0
-      );
+    const [maxIndex, maxVal] = tf.tidy(() => {
+      const img = tf.browser.fromPixels(canvas, 1);
+      const inverted = tf.sub(255, img).div(255.0);
+      const resized = tf.image.resizeBilinear(inverted, [28, 28]);
+      const batched = resized.expandDims(0);
+      const prediction = model.predict(batched);
+      const values = prediction.dataSync();
+      const maxVal = Math.max(...values);
+      const maxIndex = values.indexOf(maxVal);
 
-      const maxProb = probs[maxIdx];
-      const predictedLabel = emnistLabels?.[maxIdx] ?? maxIdx;
-      predictionDiv.innerHTML = `
-        <b>Predicted:</b> ${predictedLabel} <br/>
-        <b>Confidence:</b> ${(maxProb * 100).toFixed(2)}%
-      `;
+      return [maxIndex, maxVal];
     });
+
+    predictionDiv.innerText = `Prediction: ${emnistLabels[maxIndex]} (Confidence: ${maxVal.toFixed(4)})`;
   } catch (error) {
     predictionDiv.textContent = `Error during prediction: ${error.message}`;
     console.error(error);
