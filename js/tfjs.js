@@ -81,7 +81,7 @@ const getCanvasCoords = (e) => {
   const x = (e.clientX - rect.left) * scaleX;
   const y = (e.clientY - rect.top) * scaleY;
   return { x, y };
-}
+};
 
 canvas.addEventListener("pointerdown", e => {
 
