@@ -3,92 +3,84 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.utils import to_categorical
+from tensorflow.keras import layers, models, Input
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
-from tensorflow.keras import layers, models
+from sklearn.preprocessing import MinMaxScaler
 
-df_test = pd.read_csv("./emnist-letters-test.csv", header=None)
-df_train = pd.read_csv("./emnist-letters-train.csv", header=None)
+NUM_CLASSES = 62
+BATCH_SIZE = 64
 
-def prep(X_flat):
-    X_reshaped = X_flat.reshape(-1, 28, 28)
-    X_rotated = np.rot90(X_reshaped, k=1, axes=(1, 2))
-    X_flipped = np.fliplr(X_rotated)
-    X_fixed = X_flipped[..., np.newaxis]
-    return X_fixed.astype(np.float32) / 255.0
+df_test = pd.read_csv("./emnist-byclass-test.csv", header=None)
+df_train = pd.read_csv("./emnist-byclass-train.csv", header=None)
 
-X_test = prep(df_test.drop(columns=[0]).values)
-y_test = df_test[0].values - 1
+scaler = MinMaxScaler()
+X_train_flat = df_train.drop(columns=[0]).values 
+X_test_flat = df_test.drop(columns=[0]).values 
 
-X_train = prep(df_train.drop(columns=[0]).values)
-y_train = df_train[0].values - 1
+X_train_scaled = scaler.fit_transform(X_train_flat)
+X_test_scaled = scaler.transform(X_test_flat)
 
-X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(X_train, y_train, test_size=0.1, random_state=42)
+def prep(X_scaled):
+    return np.fliplr(np.rot90(X_scaled.reshape(-1, 28, 28), 1, axes=(1, 2)))[..., None].astype(np.float32)
 
-y_train_split = to_categorical(y_train_split, 26)
-y_val_split   = to_categorical(y_val_split, 26)
-y_test        = to_categorical(y_test, 26)
+X_train = prep(X_train_scaled)
+y_train_int = df_train[0].values
+y_train = to_categorical(y_train_int, NUM_CLASSES)
 
-class_weights = compute_class_weight(
-    class_weight='balanced',
-    classes=np.arange(26),
-    y=np.argmax(y_train_split, axis=1)
-)
-class_weights = dict(enumerate(class_weights))
+X_test = prep(X_test_scaled)
+y_test = to_categorical(df_test[0].values, NUM_CLASSES)
+
+X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(X_train, y_train, test_size=0.15, random_state=42)
+
+class_weights = {i: w for i, w in enumerate(compute_class_weight('balanced', classes=np.arange(NUM_CLASSES), y=y_train_int))}
 
 train_datagen = ImageDataGenerator(
-    rotation_range=15,
-    width_shift_range=0.15,
-    height_shift_range=0.15,
-    shear_range=0.15,
-    zoom_range=0.15
+     rotation_range=8,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    shear_range=0.1,
+    zoom_range=0.1,
+    fill_mode='nearest'
 )
-val_datagen = ImageDataGenerator()
 
-def residual_block(x, filters, kernel_size=3, stride=1):
-    shortcut = x
+model = models.Sequential([
+    
+    layers.Conv2D(64, kernel_size=3, padding='same', activation='relu', input_shape=(28, 28, 1)),
+    layers.BatchNormalization(),
+    layers.Conv2D(64, kernel_size=3, padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.MaxPooling2D(pool_size=2),
+    layers.Dropout(0.25),
 
-    x = layers.Conv2D(filters, kernel_size, strides=stride, padding='same', use_bias=False)(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.ReLU()(x)
+    layers.Conv2D(128, kernel_size=3, padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.Conv2D(128, kernel_size=3, padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.MaxPooling2D(pool_size=2),
+    layers.Dropout(0.35),
 
-    x = layers.Conv2D(filters, kernel_size, strides=1, padding='same', use_bias=False)(x)
-    x = layers.BatchNormalization()(x)
+    layers.Conv2D(256, kernel_size=3, padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.Conv2D(256, kernel_size=3, padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.MaxPooling2D(pool_size=2),
+    layers.Dropout(0.4),
 
-    if stride != 1 or shortcut.shape[-1] != filters:
-        shortcut = layers.Conv2D(filters, 1, strides=stride, padding='same', use_bias=False)(shortcut)
-        shortcut = layers.BatchNormalization()(shortcut)
+    layers.Flatten(),
+    layers.Dense(512, activation='relu'),
+    layers.BatchNormalization(),
+    layers.Dropout(0.5),
 
-    x = layers.Add()([x, shortcut])
-    x = layers.ReLU()(x)
-    return x
+    layers.Dense(NUM_CLASSES, activation='softmax')
+    
+])
 
-inputs = layers.Input(shape=(28, 28, 1))
-
-x = layers.Conv2D(64, 3, strides=1, padding='same', use_bias=False)(inputs)
-x = layers.BatchNormalization()(x)
-x = layers.ReLU()(x)
-
-x = residual_block(x, 64)
-x = residual_block(x, 64)
-
-x = residual_block(x, 128, stride=2)
-x = residual_block(x, 128)
-
-x = residual_block(x, 256, stride=2)   
-x = residual_block(x, 256)
-
-x = layers.GlobalAveragePooling2D()(x)
-
-x = layers.Dropout(0.5)(x)
-
-outputs = layers.Dense(26, activation='softmax')(x)
-
-model = models.Model(inputs, outputs)
+steps_per_epoch = -(-len(X_train_split) // BATCH_SIZE)
 
 cosine_decay = tf.keras.optimizers.schedules.CosineDecayRestarts(
     initial_learning_rate=1e-3,
-    first_decay_steps=len(X_train_split) // 128 * 10,
+    first_decay_steps=steps_per_epoch * 10,
     t_mul=2.0,
     m_mul=0.8
 )
@@ -101,7 +93,7 @@ model.compile(
 
 early_stop = tf.keras.callbacks.EarlyStopping(
     monitor='val_loss',
-    patience=10,
+    patience=6,
     restore_best_weights=True
 )
 
@@ -110,9 +102,10 @@ checkpoint = tf.keras.callbacks.ModelCheckpoint(
 )
 
 model.fit(
-    train_datagen.flow(X_train_split, y_train_split, batch_size=128),
-    validation_data=val_datagen.flow(X_val_split, y_val_split, batch_size=128),
-    epochs=300,
+    train_datagen.flow(X_train_split, y_train_split, batch_size=BATCH_SIZE),
+    validation_data=(X_val_split, y_val_split),
+    epochs=17,
+    steps_per_epoch=steps_per_epoch,
     class_weight=class_weights,
     callbacks=[early_stop, checkpoint],
     verbose=2
@@ -120,8 +113,8 @@ model.fit(
 
 model.load_weights('best_model.h5')
 
-test_loss, test_acc = model.evaluate(X_test, y_test, batch_size=128)
-print(f"Test accuracy: {test_acc:.4f}")
+test_loss, test_acc = model.evaluate(X_test, y_test, verbose=2)
+print(f"test_acc: {test_acc} | test_loss: {test_loss}")
 
 model.save('HR', save_format='tf')
-
+#test_acc: 0.890614926815033 | test_loss: 0.9542901515960693
